@@ -1,6 +1,6 @@
 ---
 title: "Final Proposal (Session 2)"
-author: "Lahari Kuchibhotla, Minyan Chen, Xinran Wang, Wanxin Xia"
+author: "XXX"
 output:
   html_document:
     number_sections: true
