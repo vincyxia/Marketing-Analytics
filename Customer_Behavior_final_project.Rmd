@@ -1,0 +1,446 @@
+---
+title: "Final Proposal (Session 2)"
+author: "Lahari Kuchibhotla, Minyan Chen, Xinran Wang, Wanxin Xia"
+output:
+  html_document:
+    number_sections: true
+    df_print: paged
+    theme: journal
+    code_folding: show
+  word_document: default
+  pdf_document: default
+---
+# Part 1: Proposal
+
+## A. The business questions you are trying to address and why this question is important. 
+
+**The business question:** How customer demographics influence customer purchasing behavior.
+This is an important question for modern businesses as Customer Lifetime Value(CLV) provides valuable insight for the company. It provides information on how expensive it is to retain a certain customer. Addressing this question can help companies tailor their marketing more efficiently to their current customers and save on marketing expenditure.  
+
+
+## B. Basic information about the data, including the source and the DGP of these data. Some basic summary statistics and some plots.
+
+> This dataset is available from IBM Watson Analytics posted on [kaggle](https://www.kaggle.com/pankajjsh06/ibm-watson-marketing-customer-value-data). This dataset contains 9134 observations with information about customers demographics. There are four types of car insurance offers provided to each customer through for different sales channels, including agent, branch, call center and web. Each customer's response that whether accept or reject the offer is recorded.
+
+```{r}
+library(tidyverse)
+library(boot)
+
+data <- read.csv("WA_Fn-UseC_-Marketing-Customer-Value-Analysis.csv",header = TRUE, stringsAsFactors = TRUE)
+```
+
+> This dataset contains 24 variables and 9134 observations. Data structure of each variable is listed as below:
+
+```{r}
+str(data)
+
+#relevel Education for later interpretation.
+data$Education <- relevel(data$Education, ref = 'High School or Below')
+```
+
+> Basic statistics of several variables are as below:
+
+```{r}
+summary(data[,c("Customer.Lifetime.Value","Response","EmploymentStatus","Sales.Channel","Renew.Offer.Type","Income")])
+```
+
+> Reponses to 4 different sales channels.
+
+```{r}
+ggplot(data) +
+  geom_bar(aes(Sales.Channel, fill = Response),position = "dodge") +
+  scale_fill_manual(values=c("#9ecae1", "#3182bd"))
+
+```
+
+The plot above indicates how successful the four different sales channels for the insurance company are. 
+
+> Reponses from customers 
+
+```{r}
+ggplot() +
+  geom_histogram(data = data %>% filter(Response == "No"),
+                 aes(Customer.Lifetime.Value, fill = Response), binwidth = 1e+3,
+                 alpha = 0.5) +
+  geom_histogram(data = data %>% filter(Response == "Yes"),
+                 aes(Customer.Lifetime.Value, fill = Response), binwidth = 1e+3,
+                 alpha = 0.5) +
+  scale_fill_manual(name="Response",values=c("#9ecae1", "#3182bd"), labels=c("No","Yes"))
+```
+
+The above plot shows what is the Customer Lifetime Value for the different responses. 
+
+```{r}
+hist(log(data$Income), xlim=c(9,12))
+```
+
+The above plots shows the distribution of the log Income.
+
+## C.Why these data are suitable to solve the business question?
+
+This dataset is well organized,  having reasonable missing values, easy to be manipulated, and it is quite meaningful to our analysis. It involves many useful aspects of customer demographics, which give us a lot of information to work with. Particularly, it contains variables income, education, vehicle class which have direct and important impacts on customer purchasing behavior.  Also, we have the right dependent variable of customer accepting or denying the offer. It provides the specific focus areas for the company such as marketing towards customers with higher degrees or in certain regions so that the money being spent on marketing can be better utilized. 
+
+
+## D.Which tool is planned to solve the problem in data analysis？
+
+> 1. Due to highly imbalanced dataset, we need to resampling data.
+> 2. Logistic regression model (with & without interaction variables)
+
+# Part 2: Analysis
+
+## Dealing with imbalanced data and run the models
+
+### First: try to use original data
+```{r}
+#Run logistic regression model
+library(ROCR)
+data_new <- subset(data, select = -c(Customer,Effective.To.Date, State))
+data_result <- glm(Response~., data=data_new, family=binomial)
+summary(data_result)
+
+#Utilizing AUC as metric to choose optimal sampling data
+#Predict data
+data_result.probs <- predict(data_result, type = "response")
+contrasts(data_new$Response)
+
+#AUC score
+pred_ROCR <- prediction(data_result.probs, data_new$Response)
+auc_ROCR <- ROCR::performance(pred_ROCR, measure = "auc")
+auc_ROCR_origin <- auc_ROCR@y.values[[1]]
+auc_ROCR_origin
+```
+
+
+
+
+### Second: try to use Undersampling
+```{r}
+#randomly reduce response No observations
+set.seed(1)
+data_new_yes <- data %>%
+  filter(Response == 'Yes')
+data_new_no <- data %>%
+  filter(Response == 'No')
+index_no <- sample(7826,1308)
+data_new_no <- data_new_no[index_no,]
+data_new2 <- bind_rows(data_new_yes,data_new_no)
+
+#run logistic regression model
+data_new2 <- subset(data_new2, select = -c(Customer,Effective.To.Date, State))
+data_result2 <- glm(Response~., data=data_new2, family=binomial)
+summary(data_result2)
+
+#Utilizing AUC as metric to choose optimal sampling data
+#predict data
+data_result2.probs <- predict(data_result2, type = "response")
+
+#AUC score
+pred_ROCR <- prediction(data_result2.probs, data_new2$Response)
+auc_ROCR <- ROCR::performance(pred_ROCR, measure = "auc")
+auc_ROCR_under <- auc_ROCR@y.values[[1]]
+auc_ROCR_under
+```
+
+
+### Third: try to use random over-sampling
+```{r}
+#randomly duplicate response Yes observations
+set.seed(1)
+data_new_yes <- data %>%
+  filter(Response == 'Yes')
+data_new_no <- data %>%
+  filter(Response == 'No')
+index_yes <- sample(1308,7826,replace = TRUE)
+data_new_yes <- data_new_yes[index_yes,]
+data_new3 <- bind_rows(data_new_yes,data_new_no)
+
+#run logistic regression model
+data_new3 <- subset(data_new3, select = -c(Customer,Effective.To.Date, State))
+data_result3 <- glm(Response~., data=data_new3, family=binomial)
+summary(data_result3)
+
+#Utilizing AUC as metric to choose optimal sampling data
+#predict data
+data_result3.probs <- predict(data_result3, type = "response")
+
+#AUC score
+pred_ROCR <- prediction(data_result3.probs, data_new3$Response)
+auc_ROCR <- ROCR::performance(pred_ROCR, measure = "auc")
+auc_ROCR_over <- auc_ROCR@y.values[[1]]
+auc_ROCR_over
+```
+
+
+### Finally, try to use SMOTE + ENN
+```{r}
+library(unbalanced)
+#Step 1: SMOTE
+#this package require class to be "1" and "0" as factor, and "1" for minority class.
+data1 <- data %>%
+  mutate(Response1 = as.factor(ifelse(Response == "Yes", 1, 0)))
+
+#define input and output
+input <- data1 %>%
+  select(-c(Customer,State,Effective.To.Date, Response, Response1))
+output <- data1$Response1
+set.seed(1)
+#using SMOTE function to generate data using input and output
+df_smote <- ubBalance(X= data.frame(input), Y=output, type="ubSMOTE", percOver=300, percUnder=150, k = 3) 
+balancedData<-data.frame(df_smote$X,Response = df_smote$Y)
+summary(balancedData$Response)
+
+#Step 2: ENN
+#Using ENN to correct SMOTE
+#ENN function requires only numeric, so convert factors into numeric
+unfactorize<-c(2,3,4,5,7,8,14,15,16,17,19,20)
+balancedData[,unfactorize]<-lapply(unfactorize, function(x) as.numeric(balancedData[,x]))
+X <- balancedData[,-21]
+Y <- balancedData$Response
+df_SENN <- ubENN(X, Y, k = 3, verbose = TRUE)
+balancedData<- data.frame(df_SENN$X, Response = df_SENN$Y)
+summary(balancedData$Response)
+
+#convert numeric columns into factors
+balancedData <- balancedData %>%
+  mutate(Coverage = case_when(
+                              Coverage == 1 ~ "Basic",
+                              Coverage == 2 ~ "Extended",
+                              Coverage == 3 ~ "Premium"),
+         Education = case_when(
+                               Education == 1 ~ "High School or Below",
+                               Education == 2 ~ "Bachelor",
+                               Education == 3 ~ "College",
+                               Education == 4 ~ "Doctor",
+                               Education == 5 ~ "Master"),
+         EmploymentStatus = case_when(
+                                      EmploymentStatus == 1 ~ "Disabled",
+                                      EmploymentStatus == 2 ~ "Employed",
+                                      EmploymentStatus == 3 ~ "edical Leave",
+                                      EmploymentStatus == 4 ~ "Retired",
+                                      EmploymentStatus == 5 ~ "Unemployed"),
+         Gender = case_when(
+                            Gender == 1 ~ "F",
+                            Gender == 2 ~ "M"),
+         Location.Code = case_when(
+                                   Location.Code == 1 ~ "Rural",
+                                   Location.Code == 2 ~ "Suburban",
+                                   Location.Code == 3 ~ "Urban"),
+         Marital.Status = case_when(
+                                    Marital.Status == 1 ~ "Divorced",
+                                    Marital.Status == 2 ~ "Married",
+                                    Marital.Status == 3 ~ "Single"),
+         Policy.Type = case_when(
+                                  Policy.Type == 1 ~ "Corporate Auto",
+                                  Policy.Type == 2 ~ "Personal Auto",
+                                  Policy.Type == 3 ~ "Special Auto"),
+         Policy = case_when(
+                            Policy == 1 ~ "Corporate L1",
+                            Policy == 2 ~ "Corporate L2",
+                            Policy == 3 ~ "Corporate L3",
+                            Policy == 4 ~ "Personal L1",
+                            Policy == 5 ~ "Personal L2",
+                            Policy == 6 ~ "Personal L3",
+                            Policy == 7 ~ "Special L1",
+                            Policy == 8 ~ "Special L2",
+                            Policy == 9 ~ "Special L3"),
+         Renew.Offer.Type = case_when(
+                                      Renew.Offer.Type == 1 ~ "Offer1",
+                                      Renew.Offer.Type == 2 ~ "Offer2",
+                                      Renew.Offer.Type == 3 ~ "Offer3",
+                                      Renew.Offer.Type == 4 ~ "Offer4"),
+         Sales.Channel = case_when(
+                                  Sales.Channel == 1 ~ "Agent",
+                                  Sales.Channel == 2 ~ "Branch",
+                                  Sales.Channel == 3 ~ "Call Center",
+                                  Sales.Channel == 4 ~ "Web"),
+         Vehicle.Class = case_when(
+                                  Vehicle.Class == 1 ~ "Four-Door Car",
+                                  Vehicle.Class == 2 ~ "Luxury Car",
+                                  Vehicle.Class == 3 ~ "Luxury SUV",
+                                  Vehicle.Class == 4 ~ "Sports Car",
+                                  Vehicle.Class == 5 ~ "SUV",
+                                  Vehicle.Class == 6 ~ "Two-Door Car"),
+         Vehicle.Size = case_when(
+                                  Vehicle.Size == 1 ~ "Large",
+                                  Vehicle.Size == 2 ~ "Medsize",
+                                  Vehicle.Size == 3 ~ "Small"))
+factorize<-c(2,3,4,5,7,8,14,15,16,17,19,20)
+balancedData[,factorize]<-lapply(factorize, function(x) as.factor(balancedData[,x])) 
+balancedData$Education <- relevel(balancedData$Education, ref = 'High School or Below')
+#####################################################################################################
+
+#Utilizing AUC as metric to choose optimal sampling data
+#using new data to run logistic regression model
+df_smote_result <- glm(Response~., data=balancedData, family=binomial)
+summary(df_smote_result)
+
+#predict data
+df_smote_result.probs <- predict(df_smote_result, type = "response")
+
+#AUC score
+pred_ROCR <- prediction(df_smote_result.probs, balancedData$Response)
+auc_ROCR <- ROCR::performance(pred_ROCR, measure = "auc")
+auc_ROCR_SE <- auc_ROCR@y.values[[1]]
+auc_ROCR_SE
+```
+
+### Compare the AUC among different sampling methods.
+```{r}
+aucs <- as.data.frame(t(c(auc_ROCR_origin, auc_ROCR_under, auc_ROCR_over, auc_ROCR_SE)))
+colnames(aucs) <- c("original data", "undersampling", "oversampling", "SMOTE+ENN")
+aucs
+```
+SMOTE + ENN has the highest auc, so we select SMOTE to sample and run final model.
+
+# Part Tree
+
+## Maybe add interaction variables?
+
+### Let's try Income with education, Vehicle Size and LocationCode
+```{r}
+#With interaction variables
+df_smote_inter_result1 <- glm(Response ~.  + Income * Education  + Income * Location.Code  + Income * Vehicle.Size, data = balancedData,  family=binomial)
+summary(df_smote_inter_result1)
+
+#predict data
+df_smote_inter_result1.probs <- predict(df_smote_inter_result1, type = "response")
+
+#AUC score
+pred_ROCR <- prediction(df_smote_inter_result1.probs, balancedData$Response)
+auc_ROCR <- ROCR::performance(pred_ROCR, measure = "auc")
+auc_ROCR_int1 <- auc_ROCR@y.values[[1]]
+auc_ROCR_int1
+```
+
+We can see that AUC is higher than the model without interaction variables. But wait, our estimation seems not make sense at all. When Income increases, people in high school are most likely to say yes. We think it is possible that this anomaly is resulted from wrongly selecting interaction variables. For individuals in our dataset, maybe there is no relationship between income and education level.
+
+#### Let's plot to see whether our hypothesis is correct
+```{r}
+data_income <- balancedData %>%
+  filter(Income > 0)
+ggplot(data = data_income) + 
+  geom_histogram(aes(Income), binwidth = 1e+3,
+                 alpha = 0.5) + 
+  facet_wrap(~ Education, nrow = 2)
+```
+
+The plot above approves our hypothesis that in these distribution, there is no obvious difference among different people who have different education levels. The income is all arounded by 25000.
+
+
+### Let's switch to Income with RenewOfferType, LocationCode, VehicleSize
+
+```{r}
+#With interaction variables
+df_smote_inter_result2 <- glm(Response ~.  + Income * Renew.Offer.Type  + Income * Location.Code + Income * Vehicle.Size , data = balancedData,  family=binomial)
+summary(df_smote_inter_result2)
+
+#predict data
+df_smote_inter_result2.probs <- predict(df_smote_inter_result2, type = "response")
+
+#AUC score
+pred_ROCR <- prediction(df_smote_inter_result2.probs, balancedData$Response)
+auc_ROCR <- ROCR::performance(pred_ROCR, measure = "auc")
+auc_ROCR_int2 <- auc_ROCR@y.values[[1]]
+auc_ROCR_int2
+```
+This time, the result is more reasonable than previous one. We think that it is necessary to add interaction variable beween income and renew offer type. Because our goal is to target on people. If we know the information about how people with different income will make purchasing decisions on different offer types, we can better target on customers with specific offer type. Besides, in this model, AUC is also higher than that of the model without interaction variables.
+
+This is our final model, and our final conclusion about which customers to target is presented on slides.
+
+# Appendix: For PPT Use - Imbalanced data visualization
+
+## Original data
+```{r}
+#summarize response proportion
+pie_data <- data_new %>%
+  group_by(Response) %>%
+  summarise(n = n()) %>%
+  mutate(freq = round(n / sum(n)*100,1)) %>%
+  arrange(desc(Response)) %>%
+  mutate(ypos = cumsum(freq)- 0.5*freq )
+  
+#plot proportion
+mycols <- c("#e31a1c", "#3182bd")
+ggplot(pie_data, aes(x = "", y = n, fill = Response)) +
+  geom_bar(width = 1,  stat = "identity", color = "white") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = n),
+            position = position_stack(vjust = 0.5),
+            color = "white")+
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = paste("data size = ",sum(pie_data$n))) +
+  theme_void()
+```
+
+## Undersampling
+```{r}
+#summarize response proportion
+pie_data2 <- data_new2 %>%
+  group_by(Response) %>%
+  summarise(n = n()) %>%
+  mutate(freq = round(n / sum(n)*100,1)) %>%
+  arrange(desc(Response)) %>%
+  mutate(ypos = cumsum(freq)- 0.5*freq )
+  
+#plot proportion
+mycols1 <- c("#3182bd", "#9ecae1")
+ggplot(pie_data2, aes(x = "", y = n, fill = Response)) +
+  geom_bar(width = 1,  stat = "identity", color = "white") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = n),
+            position = position_stack(vjust = 0.5),
+            color = "white")+
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = paste("data size = ",sum(pie_data2$n))) +
+  theme_void()
+```
+
+## random oversampling
+```{r}
+#summarize response proportion
+pie_data3 <- data_new3 %>%
+  group_by(Response) %>%
+  summarise(n = n()) %>%
+  mutate(freq = round(n / sum(n)*100,1)) %>%
+  arrange(desc(Response)) %>%
+  mutate(ypos = cumsum(freq)- 0.5*freq )
+  
+#plot proportion
+mycols1 <- c("#3182bd", "#9ecae1")
+ggplot(pie_data3, aes(x = "", y = n, fill = Response)) +
+  geom_bar(width = 1,  stat = "identity", color = "white") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = n),
+            position = position_stack(vjust = 0.5),
+            color = "white")+
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = paste("data size = ",sum(pie_data3$n))) +
+  theme_void()
+```
+
+## SMOTE
+```{r}
+#summarize response proportion
+pie_data1 <- balancedData %>%
+  group_by(Response) %>%
+  summarise(n = n()) %>%
+  mutate(freq = round(n / sum(n)*100,1)) %>%
+  arrange(desc(Response)) %>%
+  mutate(ypos = cumsum(freq)- 0.5*freq )
+  
+#plot proportion
+mycols1 <- c("#3182bd", "#9ecae1")
+ggplot(pie_data1, aes(x = "", y = n, fill = Response)) +
+  geom_bar(width = 1,  stat = "identity", color = "white") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = n),
+            position = position_stack(vjust = 0.5),
+            color = "white")+
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = paste("data size = ",sum(pie_data1$n))) +
+  theme_void()
+```
+
+
+
+
